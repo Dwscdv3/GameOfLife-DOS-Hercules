@@ -13,10 +13,8 @@ ADDR_CMDLINE            equ 0x81
 SCREEN_WIDTH            equ 720
 SCREEN_HEIGHT           equ 348
 ROW_BYTES               equ SCREEN_WIDTH / 8
-WIDTH_PER_CELL          equ 3
-HEIGHT_PER_CELL         equ 2
-GRID_WIDTH              equ SCREEN_WIDTH / WIDTH_PER_CELL
-GRID_HEIGHT             equ SCREEN_HEIGHT / HEIGHT_PER_CELL
+BOARD_WIDTH             equ 240
+BOARD_HEIGHT            equ 174
 
 
 section .text
@@ -31,215 +29,236 @@ start:
     mov [handle], ax
     ReadFile [handle], seed, seed.end - seed
     CloseFile [handle]
+
 reset:
+    mov ax, ds
+    mov es, ax
+    mov si, seed
+    mov di, board
+    mov ah, 10000000b
+.loop_start:
+    cmp si, seed.end
+    jae .loop_end
+    mov al, [si]
+    and al, ah
+    jz .false
+    mov al, 1
+.false:
+    stosb
+    ror ah, 1
+    jnc .skip_inc_si
+    inc si
+.skip_inc_si:
+    jmp .loop_start
+.loop_end:
+
+main:
+    call draw
+    call tick
+    jmp main
+
+draw:
     mov ax, SEG_FRAMEBUFFER_1
     mov es, ax
-    mov ax, SEG_FRAMEBUFFER_2
-    mov ds, ax
-    mov bp, seed
-    xor bx, bx
-    xor cx, cx
-    xor dx, dx
+    mov si, board
+    xor di, di
     BeginCounterLoopAsc y, dl, 0
-        BeginCounterLoopAsc x, cl, 0
-            %macro UnrollBody 2
-                mov bl, [bp]
-                and bl, dh
-                times %2 %1 bl, 1
-                call set_cell
-                inc cl
-                shr dh, 1
-            %endmacro
-            mov dh, 10000000b
-            UnrollBody shr, 4
-            UnrollBody shr, 3
-            UnrollBody shr, 2
-            UnrollBody shr, 1
-            UnrollBody shr, 0
-            UnrollBody shl, 1
-            UnrollBody shl, 2
-            mov bl, [bp]
-            and bl, dh
-            times 3 shl bl, 1
-            call set_cell
-            inc bp
-            %undef UnrollBody
-        EndCounterLoopAsc x, cl, GRID_WIDTH
-    EndCounterLoopAsc y, dl, GRID_HEIGHT
-    call swap_ds_es
-tick:
-    xor cx, cx
-    xor dx, dx
-    BeginCounterLoopAsc y, dl, 0
-        BeginCounterLoopAsc x, cl, 0
-            %macro GetCellAndCount 0
-                call get_cell
-                test al, al
-                jz %%skip
-                shl bl, 1
-            %%skip:
-            %endmacro
-            mov bx, 1
-            dec dl
-            GetCellAndCount
-            inc cl
-            GetCellAndCount
-            inc dl
-            GetCellAndCount
-            inc dl
-            GetCellAndCount
-            dec cl
-            GetCellAndCount
-            dec cl
-            GetCellAndCount
-            dec dl
-            test bl, 00001111b
-            jz .early_return
-            GetCellAndCount
-            test bl, 00001110b
-            jz .early_return
-            dec dl
-            GetCellAndCount
-            inc dl
-        .early_return:
-            inc cl
-            call get_cell
+        %macro UnrollBody 1
+            lodsb
             test al, al
-            jz .self_is_dead
-            add bl, 00000100b
-        .self_is_dead:
-            and bl, 00001000b
-            call set_cell
-        EndCounterLoopAsc x, cl, GRID_WIDTH
-    EndCounterLoopAsc y, dl, GRID_HEIGHT
-    call swap_ds_es
-    call hercules_page_flip
-    jmp tick
+            jz %%else
+            %if %1 < 0x100
+                mov al, %1
+                or byte [es: di], al
+                or byte [es: di + 0x2000], al
+            %else
+                mov ax, %1
+                or word [es: di], ax
+                or word [es: di + 0x2000], ax
+            %endif
+            jmp %%endif
+        %%else:
+            %if %1 < 0x100
+                mov al, ~%1
+                and word [es: di], ax
+                and word [es: di + 0x2000], ax
+            %else
+                mov ax, ~%1
+                and word [es: di], ax
+                and word [es: di + 0x2000], ax
+            %endif
+        %%endif:
+        %endmacro
 
-swap_ds_es:
+        %macro DrawRow 1
+            BeginCounterLoopAsc x_%1, dh, 0
+                UnrollBody 11100000b
+                UnrollBody 00011100b
+                UnrollBody 1000000000000011b
+                inc di
+                UnrollBody 01110000b
+                UnrollBody 00001110b
+                UnrollBody 1100000000000001b
+                inc di
+                UnrollBody 00111000b
+                UnrollBody 00000111b
+                inc di
+            EndCounterLoopAsc x_%1, dh, SCREEN_WIDTH / 24
+        %endmacro
+
+        DrawRow bank01
+        add di, 0x4000 - ROW_BYTES
+        DrawRow bank23
+        sub di, 0x4000
+
+        %undef DrawRow
+        %undef UnrollBody
+    EndCounterLoopAsc y, dl, BOARD_HEIGHT / 2
+    ret
+
+tick:
+    %macro Count 0
+        test [si], dh
+        jz %%false
+        inc ah
+    %%false:
+    %endmacro
+
+    %macro Set 0
+        cmp ah, 3
+        je %%live
+        cmp ah, 2
+        jne %%die
+        test [di], dh
+        jz %%die
+    %%live:
+        or byte [di], 2
+    %%die:
+        inc di
+    %endmacro
+
+    %macro Up 0
+        sub si, BOARD_WIDTH
+        Count
+    %endmacro
+
+    %macro Down 0
+        add si, BOARD_WIDTH
+        Count
+    %endmacro
+
+    %macro Left 0
+        dec si
+        Count
+    %endmacro
+
+    %macro Right 0
+        inc si
+        Count
+    %endmacro
+
+    %define ResetCounter xor ah, ah
+
     mov ax, ds
-    mov bx, es
-    mov ds, bx
     mov es, ax
-    ret
+    mov si, board
+    mov di, board
+    mov dh, 1
 
-%macro Mul3_Div8_To 2
-    mov %2, %1
-    times 2 add %2, %1
-    times 3 shr %2, 1
-%endmacro
+    ResetCounter
+    Down
+    Right
+    Up
+    Set
+    mov cx, BOARD_WIDTH - 2
+    .loop_first_row:
+        ResetCounter
+        Left
+        Down
+        Right
+        Right
+        Up
+        Set
+    loop .loop_first_row
+    ResetCounter
+    Left
+    Down
+    Right
+    Set
+    sub si, BOARD_WIDTH - 1
 
-; @input CX: x
-; @input DL: y
-; @modify AL: return value 0 or non-0
-; @modify AH: garbage
-; @modify DI: index of target cell's first byte
-; @modify BP: x % 8
-get_cell:
-    cmp dl, GRID_HEIGHT
-    jae .out_of_bound
-    cmp cx, GRID_WIDTH
-    jae .out_of_bound
-    mov ah, dl
-    and ax, 0000000100000000b
-    times 6 shl ax, 1
-    mov di, ax
-    mov al, ROW_BYTES
-    mov ah, dl
-    shr ah, 1
-    mul ah
-    Mul3_Div8_To cx, bp
-    add ax, bp
-    add di, ax
-    mov bp, cx
-    and bp, byte 00000111b
-    mov ah, [.mask_table + bp]
-    mov al, [di]
-    and al, ah
-    ret
-.out_of_bound:
-    xor al, al
-    ret
-.mask_table:
-    db 10000000b, 00010000b, 00000010b, 01000000b
-    db 00001000b, 00000001b, 00100000b, 00000100b
+    BeginCounterLoopAsc y, dl, 1
+        ResetCounter
+        Down
+        Right
+        Up
+        Up
+        Left
+        Set
+        add si, BOARD_WIDTH + 1
+        BeginCounterLoopAsc x, cl, 1
+            ResetCounter
+            Up
+            Left
+            Down
+            Down
+            Right
+            Right
+            Up
+            Up
+            Set
+            add si, BOARD_WIDTH
+        EndCounterLoopAsc x, cl, BOARD_WIDTH - 1
+        ResetCounter
+        Up
+        Left
+        Down
+        Down
+        Right
+        Set
+        sub si, BOARD_WIDTH - 1
+    EndCounterLoopAsc y, dl, BOARD_HEIGHT - 1
 
-; @input CX: x
-; @input DL: y
-; @input BX: value, must be 0 (false) or 8 (true)
-; @modify AX: garbage
-; @modify BX: garbage
-; @modify SI: garbage
-; @modify DI: index of target cell's first byte
-set_cell:
-    mov ah, dl
-    and ax, 0000000100000000b
-    times 6 shl ax, 1
-    mov di, ax
-    mov al, ROW_BYTES
-    mov ah, dl
-    shr ah, 1
-    mul ah
-    Mul3_Div8_To cx, si
-    add ax, si
-    add di, ax
-    mov si, cx
-    and si, byte 00000111b
-    add bx, si
-    shl bx, 1
-    mov ax, [cs: .jump_table + bx]
-    jmp ax
-.0  and byte [es: di],          00011111b
-    and byte [es: di + 0x2000], 00011111b
+    ResetCounter
+    Up
+    Right
+    Down
+    Set
+    mov cx, BOARD_WIDTH - 2
+    .loop_last_row:
+        ResetCounter
+        Left
+        Up
+        Right
+        Right
+        Down
+        Set
+    loop .loop_last_row
+    ResetCounter
+    Left
+    Up
+    Right
+    Set
+
+    %define UNROLL_TIMES 20
+    mov si, board
+    mov cx, BOARD_WIDTH * BOARD_HEIGHT / UNROLL_TIMES
+    .loop_start:
+        %rep UNROLL_TIMES
+            shr byte [si], 1
+            inc si
+        %endrep
+    loop .loop_start
+    %undef UNROLL_TIMES
+
+    %undef Up
+    %undef Down
+    %undef Left
+    %undef Right
+    %undef ResetCounter
+    %undef Count
+    %undef Set
     ret
-.1  and byte [es: di],          11100011b
-    and byte [es: di + 0x2000], 11100011b
-    ret
-.2  and word [es: di],          0111111111111100b
-    and word [es: di + 0x2000], 0111111111111100b
-    ret
-.3  and byte [es: di],          10001111b
-    and byte [es: di + 0x2000], 10001111b
-    ret
-.4  and byte [es: di],          11110001b
-    and byte [es: di + 0x2000], 11110001b
-    ret
-.5  and word [es: di],          0011111111111110b
-    and word [es: di + 0x2000], 0011111111111110b
-    ret
-.6  and byte [es: di],          11000111b
-    and byte [es: di + 0x2000], 11000111b
-    ret
-.7  and byte [es: di],          11111000b
-    and byte [es: di + 0x2000], 11111000b
-    ret
-.8  or byte [es: di],          11100000b
-    or byte [es: di + 0x2000], 11100000b
-    ret
-.9  or byte [es: di],          00011100b
-    or byte [es: di + 0x2000], 00011100b
-    ret
-.10 or word [es: di],          1000000000000011b
-    or word [es: di + 0x2000], 1000000000000011b
-    ret
-.11 or byte [es: di],          01110000b
-    or byte [es: di + 0x2000], 01110000b
-    ret
-.12 or byte [es: di],          00001110b
-    or byte [es: di + 0x2000], 00001110b
-    ret
-.13 or word [es: di],          1100000000000001b
-    or word [es: di + 0x2000], 1100000000000001b
-    ret
-.14 or byte [es: di],          00111000b
-    or byte [es: di + 0x2000], 00111000b
-    ret
-.15 or byte [es: di],          00000111b
-    or byte [es: di + 0x2000], 00000111b
-    ret
-.jump_table:
-    dw  .0,  .1,  .2,  .3,  .4,  .5,  .6,  .7
-    dw  .8,  .9, .10, .11, .12, .13, .14, .15
 
 ; @modify SI: address of first argument
 tokenize_cmdline:
@@ -279,5 +298,7 @@ handle  dw 0
 
 section .bss
 
-seed    resb GRID_WIDTH * GRID_HEIGHT / 8
+seed    resb BOARD_WIDTH * BOARD_HEIGHT / 8
+        .end:
+board   resb BOARD_WIDTH * BOARD_HEIGHT
         .end:

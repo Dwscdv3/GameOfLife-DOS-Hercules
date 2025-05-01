@@ -44,33 +44,19 @@ hercules_page_flip:
     ret
 
 hercules_gmode:
-    push ds
-
-    mov ax, ss
-    mov ds, ax
-
     mov al, hercules_grph
     lea si, hercules_gtable
     mov bx, 0
     mov cx, 0x4000
     call hercules_setmd
-
-    pop ds
     ret
 
 hercules_tmode:
-    push ds
-
-    mov ax, ss
-    mov ds, ax
-
     mov al, hercules_text
     lea si, hercules_ttable
     mov bx, 0x720
     mov cx, 0x2000
     call hercules_setmd
-
-    pop ds
     ret
 
 hercules_setmd:
