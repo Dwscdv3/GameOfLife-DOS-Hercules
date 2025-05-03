@@ -1,6 +1,7 @@
 cpu 8086
 
 org 0x100
+start_of_image:
 jmp start
 
 %include "controlflow.inc"
@@ -27,13 +28,15 @@ start:
     CloseFile bx
 
 reset:
-    mov ax, ds
+    mov ax, ss
+    mov ds, ax
+    add ax, (0x100 + end_of_image - start_of_image + PACKED_SIZE) >> 4
     mov es, ax
     mov si, seed
-    mov di, board
+    xor di, di
     mov ah, 10000000b
 .loop_start:
-    cmp si, seed + PACKED_SIZE
+    cmp di, UNPACKED_SIZE
     jae .loop_end
     mov al, [si]
     and al, ah
@@ -47,15 +50,27 @@ reset:
 .skip_inc_si:
     jmp .loop_start
 .loop_end:
-    mov ax, SEG_FRAMEBUFFER_1
-    mov es, ax
 
 main:
+    mov ax, es
+    mov ds, ax
     call draw
+    mov ax, ds
+    add ax, 0x1000
+    mov es, ax
+    call update
+    mov ax, es
+    mov ds, ax
+    call draw
+    mov ax, ds
+    sub ax, 0x1000
+    mov es, ax
     call update
     jmp main
 
 draw:
+    mov ax, SEG_FRAMEBUFFER_1
+    mov es, ax
     xor si, si
     xor di, di
 
@@ -107,145 +122,114 @@ draw:
         add di, 0x4000 - ROW_BYTES
         DrawRow
         sub di, 0x4000
-
-        %undef DrawRow
-        %undef UnrollBody
     EndCounterLoopDesc y, dl
 
     ret
 
 update:
-    %macro Count 0
-        test [si], dh
-        jz %%false
-        inc ah
-    %%false:
+    %macro Count 1
+        %1 ah, [si]
     %endmacro
 
     %macro Set 0
         cmp ah, 3
-        je %%live
-        cmp ah, 2
-        jne %%die
-        test [di], dh
-        jz %%die
-    %%live:
-        or byte [di], 2
+        jb %%die
+        mov al, dh
+        je %%end
+        cmp ah, 4
+        mov al, [di]
+        je %%end
     %%die:
-        inc di
+        xor al, al
+    %%end:
+        stosb
     %endmacro
 
-    %macro Up 0
-        sub si, bx
-        Count
+    %macro Up 1
+        sub si, bp
+        Count %1
     %endmacro
 
-    %macro Down 0
-        add si, bx
-        Count
+    %macro Down 1
+        add si, bp
+        Count %1
     %endmacro
 
-    %macro Left 0
+    %macro Left 1
         dec si
-        Count
+        Count %1
     %endmacro
 
-    %macro Right 0
+    %macro Left2 1
+        dec si
+        Left %1
+    %endmacro
+
+    %macro Right 1
         inc si
-        Count
+        Count %1
+    %endmacro
+
+    %macro Right3 1
+        add si, bx
+        Count %1
     %endmacro
 
     %define ResetCounter xor ah, ah
 
+    %macro ConvolveRowWithHeight 1
+        ResetCounter
+        Count add
+        %rep %1 - 1
+            Down add
+        %endrep
+        Right add
+        %rep %1 - 1
+            Up add
+        %endrep
+        Set
+        Right add
+        %rep %1 - 1
+            Down add
+        %endrep
+        Set
+        mov cl, BOARD_WIDTH - 3
+        %%loop_start:
+            Left2 sub
+            %rep %1 - 1
+                Up sub
+            %endrep
+            Right3 add
+            %rep %1 - 1
+                Down add
+            %endrep
+            Set
+        loop %%loop_start
+        Left2 sub
+        %rep %1 - 1
+            Up sub
+        %endrep
+        Set
+    %endmacro
+
+    xor cx, cx
     xor si, si
     xor di, di
-    mov bx, BOARD_WIDTH
     mov dh, 1
+    mov bp, BOARD_WIDTH
+    mov bx, 3
 
-    ResetCounter
-    Down
-    Right
-    Up
-    Set
-    mov cl, BOARD_WIDTH - 2
-    .loop_first_row:
-        ResetCounter
-        Left
-        Down
-        Right
-        Right
-        Up
-        Set
-    loop .loop_first_row
-    ResetCounter
-    Left
-    Down
-    Right
-    Set
-    inc si
-
+    ConvolveRowWithHeight 2
+    xor si, si
     BeginCounterLoopDesc y, dl, BOARD_HEIGHT - 2
-        ResetCounter
-        Count
-        Right
-        Up
-        Up
-        Left
-        Set
-        inc si
-        mov cl, BOARD_WIDTH - 2
-        .loop_row:
-            ResetCounter
-            Count
-            Left
-            Down
-            Down
-            Right
-            Right
-            Up
-            Up
-            Set
-        loop .loop_row
-        ResetCounter
-        Count
-        Left
-        Down
-        Down
-        Right
-        Set
-        inc si
+        ConvolveRowWithHeight 3
+        add si, bx
     EndCounterLoopDesc y, dl
-    sub si, bx
+    ConvolveRowWithHeight 2
 
-    ResetCounter
-    Up
-    Right
-    Down
-    Set
-    mov cl, BOARD_WIDTH - 2
-    .loop_last_row:
-        ResetCounter
-        Left
-        Up
-        Right
-        Right
-        Down
-        Set
-    loop .loop_last_row
-    ResetCounter
-    Left
-    Up
-    Right
-    Set
-
-    %undef Up
-    %undef Down
-    %undef Left
-    %undef Right
-    %undef ResetCounter
-    %undef Count
-    %undef Set
     ret
+
+seed:
 
 ; @modify SI: address of first argument
 ; @modify DI: garbage
@@ -260,18 +244,14 @@ get_arg0:
 .after_trim:
     mov di, si
 .tokenize:
-    cmp di, 0x100
-    jge .after_tokenize
     cmp byte [di], ' '
-    je .replace_char
+    je .terminate_string
     cmp byte [di], 0x0D
-    je .replace_char
+    je .terminate_string
     inc di
     jmp .tokenize
-.replace_char:
+.terminate_string:
     mov byte [di], 0
-.after_tokenize:
     ret
 
-seed    resb PACKED_SIZE
 end_of_image:
