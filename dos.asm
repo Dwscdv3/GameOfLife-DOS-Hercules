@@ -41,9 +41,6 @@ READ_WRITE  equ 2
     jc fatal
 %endmacro
 
-
-section .text
-
 fatal:
     mov ah, 0x4C
     int 0x21

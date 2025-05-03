@@ -5,16 +5,10 @@ HERCULES_SWITCH  equ 0x03BF
 HERCULES_SCRN_ON equ 00001000b
 HERCULES_GRPH    equ 00000010b
 
-
-section .data
-
 hercules_gtable:
     db 0x35, 0x2D, 0x2E, 0x07
     db 0x5B, 0x02, 0x57, 0x57
     db 0x02, 0x03, 0x00, 0x00
-
-
-section .text
 
 hercules_protection_off:
     mov dx, HERCULES_SWITCH

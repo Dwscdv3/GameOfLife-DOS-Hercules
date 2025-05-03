@@ -16,9 +16,6 @@ BOARD_HEIGHT            equ 174
 UNPACKED_SIZE           equ BOARD_WIDTH * BOARD_HEIGHT
 PACKED_SIZE             equ UNPACKED_SIZE / 8
 
-
-section .text
-
 start:
     call hercules_protection_off
     call hercules_graphics_mode
@@ -55,11 +52,11 @@ reset:
 
 main:
     call draw
-    call tick
+    call update
     jmp main
 
 draw:
-    mov si, board
+    xor si, si
     xor di, di
 
     BeginCounterLoopDesc y, dl, BOARD_HEIGHT / 2
@@ -117,7 +114,7 @@ draw:
 
     ret
 
-tick:
+update:
     %macro Count 0
         test [si], dh
         jz %%false
@@ -160,8 +157,8 @@ tick:
 
     %define ResetCounter xor ah, ah
 
-    mov si, board
-    mov di, board
+    xor si, si
+    xor di, di
     mov bx, BOARD_WIDTH
     mov dh, 1
 
@@ -241,17 +238,6 @@ tick:
     Right
     Set
 
-    %define UNROLL_TIMES 20
-    mov si, board
-    mov cx, UNPACKED_SIZE / UNROLL_TIMES
-    .loop_start:
-        %rep UNROLL_TIMES
-            shr byte [si], 1
-            inc si
-        %endrep
-    loop .loop_start
-    %undef UNROLL_TIMES
-
     %undef Up
     %undef Down
     %undef Left
@@ -287,8 +273,5 @@ get_arg0:
 .after_tokenize:
     ret
 
-
-section .bss
-
 seed    resb PACKED_SIZE
-board   resb UNPACKED_SIZE
+end_of_image:
