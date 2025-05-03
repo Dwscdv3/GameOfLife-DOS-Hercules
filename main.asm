@@ -8,27 +8,26 @@ jmp start
 %include "hercules.asm"
 
 SEG_FRAMEBUFFER_1       equ 0xB000
-SEG_FRAMEBUFFER_2       equ 0xB800
 ADDR_CMDLINE            equ 0x81
 SCREEN_WIDTH            equ 720
-SCREEN_HEIGHT           equ 348
 ROW_BYTES               equ SCREEN_WIDTH / 8
 BOARD_WIDTH             equ 240
 BOARD_HEIGHT            equ 174
+UNPACKED_SIZE           equ BOARD_WIDTH * BOARD_HEIGHT
+PACKED_SIZE             equ UNPACKED_SIZE / 8
 
 
 section .text
 
 start:
-    mov bx, onexit
     call hercules_protection_off
-    mov word [bx], hercules_tmode
-    call hercules_gmode
-    call tokenize_cmdline
+    call hercules_graphics_mode
+
+    call get_arg0
     OpenFile si, READ_ONLY
-    mov [handle], ax
-    ReadFile [handle], seed, seed.end - seed
-    CloseFile [handle]
+    mov bx, ax
+    ReadFile bx, seed, PACKED_SIZE
+    CloseFile bx
 
 reset:
     mov ax, ds
@@ -37,7 +36,7 @@ reset:
     mov di, board
     mov ah, 10000000b
 .loop_start:
-    cmp si, seed.end
+    cmp si, seed + PACKED_SIZE
     jae .loop_end
     mov al, [si]
     and al, ah
@@ -51,6 +50,8 @@ reset:
 .skip_inc_si:
     jmp .loop_start
 .loop_end:
+    mov ax, SEG_FRAMEBUFFER_1
+    mov es, ax
 
 main:
     call draw
@@ -58,11 +59,10 @@ main:
     jmp main
 
 draw:
-    mov ax, SEG_FRAMEBUFFER_1
-    mov es, ax
     mov si, board
     xor di, di
-    BeginCounterLoopAsc y, dl, 0
+
+    BeginCounterLoopDesc y, dl, BOARD_HEIGHT / 2
         %macro UnrollBody 1
             lodsb
             test al, al
@@ -90,8 +90,8 @@ draw:
         %%endif:
         %endmacro
 
-        %macro DrawRow 1
-            BeginCounterLoopAsc x_%1, dh, 0
+        %macro DrawRow 0
+            BeginCounterLoopDesc %%x, dh, SCREEN_WIDTH / 24
                 UnrollBody 11100000b
                 UnrollBody 00011100b
                 UnrollBody 1000000000000011b
@@ -103,17 +103,18 @@ draw:
                 UnrollBody 00111000b
                 UnrollBody 00000111b
                 inc di
-            EndCounterLoopAsc x_%1, dh, SCREEN_WIDTH / 24
+            EndCounterLoopDesc %%x, dh
         %endmacro
 
-        DrawRow bank01
+        DrawRow
         add di, 0x4000 - ROW_BYTES
-        DrawRow bank23
+        DrawRow
         sub di, 0x4000
 
         %undef DrawRow
         %undef UnrollBody
-    EndCounterLoopAsc y, dl, BOARD_HEIGHT / 2
+    EndCounterLoopDesc y, dl
+
     ret
 
 tick:
@@ -159,8 +160,6 @@ tick:
 
     %define ResetCounter xor ah, ah
 
-    mov ax, ds
-    mov es, ax
     mov si, board
     mov di, board
     mov dh, 1
@@ -170,7 +169,7 @@ tick:
     Right
     Up
     Set
-    mov cx, BOARD_WIDTH - 2
+    mov cl, BOARD_WIDTH - 2
     .loop_first_row:
         ResetCounter
         Left
@@ -185,20 +184,21 @@ tick:
     Down
     Right
     Set
-    sub si, BOARD_WIDTH - 1
+    inc si
 
-    BeginCounterLoopAsc y, dl, 1
+    BeginCounterLoopDesc y, dl, BOARD_HEIGHT - 2
         ResetCounter
-        Down
+        Count
         Right
         Up
         Up
         Left
         Set
-        add si, BOARD_WIDTH + 1
-        BeginCounterLoopAsc x, cl, 1
+        inc si
+        mov cl, BOARD_WIDTH - 2
+        .loop_row:
             ResetCounter
-            Up
+            Count
             Left
             Down
             Down
@@ -207,24 +207,24 @@ tick:
             Up
             Up
             Set
-            add si, BOARD_WIDTH
-        EndCounterLoopAsc x, cl, BOARD_WIDTH - 1
+        loop .loop_row
         ResetCounter
-        Up
+        Count
         Left
         Down
         Down
         Right
         Set
-        sub si, BOARD_WIDTH - 1
-    EndCounterLoopAsc y, dl, BOARD_HEIGHT - 1
+        inc si
+    EndCounterLoopDesc y, dl
+    sub si, BOARD_WIDTH
 
     ResetCounter
     Up
     Right
     Down
     Set
-    mov cx, BOARD_WIDTH - 2
+    mov cl, BOARD_WIDTH - 2
     .loop_last_row:
         ResetCounter
         Left
@@ -242,7 +242,7 @@ tick:
 
     %define UNROLL_TIMES 20
     mov si, board
-    mov cx, BOARD_WIDTH * BOARD_HEIGHT / UNROLL_TIMES
+    mov cx, UNPACKED_SIZE / UNROLL_TIMES
     .loop_start:
         %rep UNROLL_TIMES
             shr byte [si], 1
@@ -261,8 +261,9 @@ tick:
     ret
 
 ; @modify SI: address of first argument
-tokenize_cmdline:
-    push di
+; @modify DI: garbage
+; @once
+get_arg0:
     mov si, ADDR_CMDLINE
 .trim:
     cmp byte [si], ' '
@@ -274,8 +275,6 @@ tokenize_cmdline:
 .tokenize:
     cmp di, 0x100
     jge .after_tokenize
-    cmp byte [di], 0
-    je .replace_char
     cmp byte [di], ' '
     je .replace_char
     cmp byte [di], 0x0D
@@ -284,21 +283,11 @@ tokenize_cmdline:
     jmp .tokenize
 .replace_char:
     mov byte [di], 0
-    inc di
-    jmp .tokenize
 .after_tokenize:
-    pop di
     ret
-
-
-section .data
-
-handle  dw 0
 
 
 section .bss
 
-seed    resb BOARD_WIDTH * BOARD_HEIGHT / 8
-        .end:
-board   resb BOARD_WIDTH * BOARD_HEIGHT
-        .end:
+seed    resb PACKED_SIZE
+board   resb UNPACKED_SIZE

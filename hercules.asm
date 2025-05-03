@@ -1,10 +1,9 @@
-hercules_index   equ 0x03B4
-hercules_control equ 0x03B8
-hercules_switch  equ 0x03BF
+HERCULES_INDEX   equ 0x03B4
+HERCULES_CONTROL equ 0x03B8
+HERCULES_SWITCH  equ 0x03BF
 
-hercules_scrn_on equ 00001000b
-hercules_grph    equ 00000010b
-hercules_text    equ 00100000b
+HERCULES_SCRN_ON equ 00001000b
+HERCULES_GRPH    equ 00000010b
 
 
 section .data
@@ -14,63 +13,32 @@ hercules_gtable:
     db 0x5B, 0x02, 0x57, 0x57
     db 0x02, 0x03, 0x00, 0x00
 
-hercules_ttable:
-    db 0x61, 0x50, 0x52, 0x0F
-    db 0x19, 0x06, 0x19, 0x19
-    db 0x02, 0x0D, 0x0B, 0x0C
-
-hercules_page   db 0
-
 
 section .text
 
 hercules_protection_off:
-    mov dx, hercules_switch
+    mov dx, HERCULES_SWITCH
     mov al, 3
     out dx, al
     ret
 
-hercules_page_flip:
-    push dx
-    mov al, [cs: hercules_page]
-    xor al, 1
-    mov [cs: hercules_page], al
-    mov cl, 7
-    shl al, cl
-    or al, hercules_grph | hercules_scrn_on
-    mov dx, hercules_control
-    out dx, al
-    pop dx
-    ret
-
-hercules_gmode:
-    mov al, hercules_grph
+hercules_graphics_mode:
+    mov al, HERCULES_GRPH
     lea si, hercules_gtable
     mov bx, 0
     mov cx, 0x4000
-    call hercules_setmd
-    ret
+    jmp hercules_set_mode
 
-hercules_tmode:
-    mov al, hercules_text
-    lea si, hercules_ttable
-    mov bx, 0x720
-    mov cx, 0x2000
-    call hercules_setmd
-    ret
-
-hercules_setmd:
+hercules_set_mode:
     push es
     push ax
     push bx
     push cx
 
-    mov dx, hercules_control
+    mov dx, HERCULES_CONTROL
     out dx, al
 
-    mov ax, ds
-    mov es, ax
-    mov dx, hercules_index
+    mov dx, HERCULES_INDEX
     mov cx, 12
     xor ah, ah
 
@@ -95,9 +63,9 @@ hercules_setmd:
     pop ax
     rep stosw
 
-    mov dx, hercules_control
+    mov dx, HERCULES_CONTROL
     pop ax
-    add al, hercules_scrn_on
+    add al, HERCULES_SCRN_ON
     out dx, al
 
     pop es

@@ -42,20 +42,8 @@ READ_WRITE  equ 2
 %endmacro
 
 
-section .data
-
-onexit  dw 0
-
-
 section .text
 
 fatal:
-    mov bx, [onexit]
-    cmp bx, 0
-    jz .skip_handler
-    push ax
-    call bx
-    pop ax
-.skip_handler:
     mov ah, 0x4C
     int 0x21
