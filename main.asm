@@ -139,12 +139,12 @@ tick:
     %endmacro
 
     %macro Up 0
-        sub si, BOARD_WIDTH
+        sub si, bx
         Count
     %endmacro
 
     %macro Down 0
-        add si, BOARD_WIDTH
+        add si, bx
         Count
     %endmacro
 
@@ -162,6 +162,7 @@ tick:
 
     mov si, board
     mov di, board
+    mov bx, BOARD_WIDTH
     mov dh, 1
 
     ResetCounter
@@ -217,7 +218,7 @@ tick:
         Set
         inc si
     EndCounterLoopDesc y, dl
-    sub si, BOARD_WIDTH
+    sub si, bx
 
     ResetCounter
     Up
